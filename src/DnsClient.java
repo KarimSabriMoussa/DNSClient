@@ -24,20 +24,18 @@ public class DnsClient {
 	private static String name;
 
 	public static void main(String[] args) {
-		parse(args);
-		DatagramPacket response = createRequest();
-		
-		printResponse(response);
+		try {
+			parse(args);
+			DatagramPacket response = createRequest();
+			printResponse(response);
+		} catch (Exception e) {	
+		}
 	}
 
 	private static void printResponse(DatagramPacket response) {
 
 		byte[] data = response.getData();
-//		for(int i = 0; i< data.length; i = i + 2) {
-//			String hex1 = Integer.toHexString(data[i]);
-//			String hex2 = Integer.toHexString(data[i+1]);
-//			System.out.println(hex1+ "\t"+ hex2);
-//		}
+
 		String auth = null;
 
 		ByteBuffer buffer = ByteBuffer.wrap(data);
@@ -45,11 +43,9 @@ public class DnsClient {
 		short responseId = buffer.getShort();
 		short flags = buffer.getShort();
 		short qdCount = buffer.getShort();
-		short anCount =	buffer.getShort();
+		short anCount = buffer.getShort();
 		short nsCount = buffer.getShort();
 		short arCount = buffer.getShort();
-
-
 
 		if (((flags >> 10) & 1) == 1) {
 			auth = "auth";
@@ -79,14 +75,19 @@ public class DnsClient {
 			return;
 		}
 
+		if (((flags >> 7) & 0x01) == 0) {
+			System.out.println("ERROR\tServer does not support recursive queries");
+		}
+
 		movePointer(buffer); // skip qname
-		buffer.getShort(); // qtype
-		buffer.getShort(); // qclass
+		buffer.getShort(); // skip qtype
+		buffer.getShort(); // skip qclass
 
 		if (anCount != 0) {
-			System.out.println("***Answer Section (" + anCount + "records )***");
+			System.out.println("***Answer Section ( " + anCount + " records )***");
 		} else {
 			System.out.println("NOTFOUND");
+			return;
 		}
 
 		for (int i = 0; i < anCount; i++) {
@@ -108,7 +109,7 @@ public class DnsClient {
 		}
 
 		if (arCount != 0) {
-			System.out.println("***Additional Section (" + arCount + "records )***");
+			System.out.println("***Additional Section (" + arCount + " records )***");
 			for (int i = 0; i < arCount; i++) {
 				movePointer(buffer);
 				short type = buffer.getShort();
@@ -150,7 +151,7 @@ public class DnsClient {
 			System.out.println("MX\t" + name + "\t" + pref + "\t" + ttl + "\t" + auth);
 			break;
 		default:
-			System.out.println("Unexpected Error"); // TODO: write specific error
+			System.out.println("Error\tType in answer section does not conform to DNS specifications"); 
 		}
 
 	}
@@ -159,13 +160,17 @@ public class DnsClient {
 
 		StringBuilder name = new StringBuilder().append("");
 
+		boolean marked = false;
+		int mark = 0;
+
 		while (true) {
-			boolean marked = false;
+
 			byte b = buffer.get();
 
 			if ((b & 0xC0) == 0xC0) {
 				if (marked == false) {
-					buffer.mark();
+					mark = buffer.position();
+					marked = true;
 				}
 				buffer.position(buffer.position() - 1);
 				short offset = buffer.getShort();
@@ -173,7 +178,7 @@ public class DnsClient {
 				buffer.position(offset);
 			} else if ((b == 0x00)) {
 				if (marked == true) {
-					buffer.reset();
+					buffer.position(mark);
 				}
 				return name.toString().substring(0, name.length() - 1);
 			} else {
@@ -196,9 +201,13 @@ public class DnsClient {
 	private static String getIp(ByteBuffer buffer) {
 		String ip = "";
 		for (int i = 0; i < 4; i++) {
-			ip.concat((Integer.toString((int) buffer.get())));
+			int num = (int) buffer.get();
+			if (num < 0) {
+				num = num + 256;
+			}
+			ip = ip.concat((Integer.toString(num)));
 			if (!(i == 3)) {
-				ip.concat(".");
+				ip = ip.concat(".");
 			}
 		}
 
@@ -235,7 +244,7 @@ public class DnsClient {
 		ByteArrayOutputStream stream = new ByteArrayOutputStream();
 
 		byte[] bytes = { (byte) 0x01, (byte) 0x00 };
-		byte[] QDCount = { (byte) 0x00, (byte) 0x00 };
+		byte[] QDCount = { (byte) 0x00, (byte) 0x01 };
 		byte[] ANCount = { (byte) 0x00, (byte) 0x00 };
 		byte[] NSCount = { (byte) 0x00, (byte) 0x00 };
 		byte[] ARCount = { (byte) 0x00, (byte) 0x00 };
@@ -351,10 +360,12 @@ public class DnsClient {
 			}
 		}
 
+		stream.write(0x00);
+
 		return stream.toByteArray();
 	}
 
-	private static void parse(String[] args) {
+	private static void parse(String[] args) throws Exception {
 		ArrayList<String> argList = new ArrayList<String>(Arrays.asList(args));
 
 		int i = argList.indexOf("-t");
@@ -362,7 +373,7 @@ public class DnsClient {
 			if (isInteger(argList.get(i + 1))) {
 				timeout = Integer.parseInt(argList.get(i + 1));
 			} else {
-				displayUsage();
+				displayUsage(1);
 			}
 		}
 
@@ -371,7 +382,7 @@ public class DnsClient {
 			if (isInteger(argList.get(i + 1))) {
 				retries = Integer.parseInt(argList.get(i + 1));
 			} else {
-				displayUsage();
+				displayUsage(2);
 			}
 		}
 
@@ -380,7 +391,7 @@ public class DnsClient {
 			if (isInteger(argList.get(i + 1))) {
 				port = Integer.parseInt(argList.get(i + 1));
 			} else {
-				displayUsage();
+				displayUsage(3);
 			}
 		}
 
@@ -389,7 +400,7 @@ public class DnsClient {
 			if (type == 1) {
 				type = 2;
 			} else {
-				displayUsage();
+				displayUsage(4);
 			}
 		}
 
@@ -398,16 +409,26 @@ public class DnsClient {
 			if (type == 1) {
 				type = 15;
 			} else {
-				displayUsage();
+				displayUsage(4);
 			}
 		}
 
 		String server = argList.get(argList.size() - 2);
-
+		
+		String ipRegex = "(\\b25[0-5]|\\b2[0-4][0-9]|\\b[01]?[0-9][0-9]?)(\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}";
+		
+		Pattern ipPattern = Pattern.compile(ipRegex);
+		
 		if (server.startsWith("@")) {
-			ipAddress = server.substring(1);
+			String ip = server.substring(1);
+			Matcher ipMatcher = ipPattern.matcher(ip);
+			if(ipMatcher.matches()) {
+				ipAddress = ip;
+			}else {
+				displayUsage(7);
+			}
 		} else {
-			displayUsage();
+			displayUsage(5);
 		}
 
 		String domainRegex = "^((?!-)[A-Za-z0-9-]" + "{1,63}(?<!-)\\.)" + "+[A-Za-z]{2,6}";
@@ -419,15 +440,36 @@ public class DnsClient {
 		if (domainMatcher.matches()) {
 			name = domainName;
 		} else {
-			displayUsage();
+			displayUsage(6);
 		}
 
 	}
 
-	private static void displayUsage() {
-		System.out.println("Invalid Input");
-		System.out
-				.println("Proper Usage: java DnsClient [-t timeout] [-r max-retries] [-p port] [-mx|-ns] @server name");
+	private static void displayUsage(int errCode)throws Exception {
+		System.out.print("ERROR\tIncorrect input syntax: ");
+		if(errCode == 1) {
+			System.out.println("the option \"-t\" requires you to specify a timeout period in seconds. Ex: -t 5");
+			throw new Exception();
+		}else if(errCode == 2) {
+			System.out.println("the option \"-r\" requires you to specify the number of maximum retries. Ex: -r 10");
+			throw new Exception();
+		}else if(errCode == 3) {
+			System.out.println("the option \"-p\" requires you to specify the destination port number. Ex: -p 53");
+			throw new Exception();
+		}else if(errCode == 4) {
+			System.out.println("the option -ns and -mx are mutually exclusive.");
+			throw new Exception();
+		}else if (errCode == 5) {
+			System.out.println("ip address must start with @.");
+			throw new Exception();
+		}else if (errCode == 6) {
+			System.out.println("Invalid domain name.");
+			throw new Exception();
+		}else if(errCode == 7) {
+			System.out.println("Invalid ip address.");
+			throw new Exception();
+		}
+		
 	}
 
 	private static boolean isInteger(String strNum) {
