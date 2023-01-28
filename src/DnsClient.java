@@ -16,7 +16,7 @@ import java.util.regex.Pattern;
 
 public class DnsClient {
 
-	private static int timeout = 5;
+	private static double timeout = 5;
 	private static int retries = 3;
 	private static int port = 53;
 	private static int type = 1;
@@ -28,7 +28,7 @@ public class DnsClient {
 			parse(args);
 			DatagramPacket response = createRequest();
 			printResponse(response);
-		} catch (Exception e) {	
+		} catch (Exception e) {
 		}
 	}
 
@@ -128,7 +128,7 @@ public class DnsClient {
 		switch (type) {
 		case 0x01:
 			String ip = getIp(buffer);
-			System.out.println("IP\t" + ip + "\t" + ttl + "\t" + auth);
+			System.out.println("IP\t\t" + ip + "\t\t" + ttl + "\t\t" + auth);
 			if (length - 4 > 0) {
 				length = (length - 4);
 				while (length > 0) {
@@ -139,19 +139,19 @@ public class DnsClient {
 			break;
 		case 0x02:
 			String serverName = getAlias(buffer);
-			System.out.println("NS\t" + serverName + "\t" + ttl + "\t" + auth);
+			System.out.println("NS\t\t" + serverName + "\t\t" + ttl + "\t\t" + auth);
 			break;
 		case 0x05:
 			String alias = getAlias(buffer);
-			System.out.println("CNAME\t" + alias + "\t" + ttl + "\t" + auth);
+			System.out.println("CNAME\t\t" + alias + "\t\t" + ttl + "\t\t" + auth);
 			break;
 		case 0x0f:
 			short pref = buffer.getShort();
 			String name = getAlias(buffer);
-			System.out.println("MX\t" + name + "\t" + pref + "\t" + ttl + "\t" + auth);
+			System.out.println("MX\t\t" + name + "\t\t" + pref + "\t\t" + ttl + "\t\t" + auth);
 			break;
 		default:
-			System.out.println("Error\tType in answer section does not conform to DNS specifications"); 
+			System.out.println("Error\tType in answer section does not conform to DNS specifications");
 		}
 
 	}
@@ -228,7 +228,7 @@ public class DnsClient {
 		}
 	}
 
-	private static DatagramPacket createRequest() {
+	private static DatagramPacket createRequest() throws Exception {
 
 		if (!printQuerySummary()) {
 			return null;
@@ -273,7 +273,7 @@ public class DnsClient {
 		for (int i = 0; i < retries; i++) {
 			try {
 				clientSocket = new DatagramSocket();
-				clientSocket.setSoTimeout(timeout * 1000);
+				clientSocket.setSoTimeout((int) (timeout * 1000));
 			} catch (SocketException e) {
 				e.printStackTrace();
 			}
@@ -296,9 +296,9 @@ public class DnsClient {
 
 				return receivePacket;
 			} catch (IOException e) {
-				e.printStackTrace();
 				if (i == retries - 1) {
 					System.out.println("Max number of retries: " + retries + " was exceeded");
+					throw new Exception();
 				}
 			}
 		}
@@ -370,8 +370,15 @@ public class DnsClient {
 
 		int i = argList.indexOf("-t");
 		if (i != -1) {
-			if (isInteger(argList.get(i + 1))) {
-				timeout = Integer.parseInt(argList.get(i + 1));
+			double t = 0;
+			try {
+				t = Double.valueOf(argList.get(i + 1));
+			} catch (Exception e) {
+				displayUsage(1);
+			}
+			if (t >= 0.001) {
+				timeout = t;
+				System.out.println(t);
 			} else {
 				displayUsage(1);
 			}
@@ -414,17 +421,17 @@ public class DnsClient {
 		}
 
 		String server = argList.get(argList.size() - 2);
-		
+
 		String ipRegex = "(\\b25[0-5]|\\b2[0-4][0-9]|\\b[01]?[0-9][0-9]?)(\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}";
-		
+
 		Pattern ipPattern = Pattern.compile(ipRegex);
-		
+
 		if (server.startsWith("@")) {
 			String ip = server.substring(1);
 			Matcher ipMatcher = ipPattern.matcher(ip);
-			if(ipMatcher.matches()) {
+			if (ipMatcher.matches()) {
 				ipAddress = ip;
-			}else {
+			} else {
 				displayUsage(7);
 			}
 		} else {
@@ -445,31 +452,32 @@ public class DnsClient {
 
 	}
 
-	private static void displayUsage(int errCode)throws Exception {
+	private static void displayUsage(int errCode) throws Exception {
 		System.out.print("ERROR\tIncorrect input syntax: ");
-		if(errCode == 1) {
-			System.out.println("the option \"-t\" requires you to specify a timeout period in seconds. Ex: -t 5");
+		if (errCode == 1) {
+			System.out.println(
+					"the option \"-t\" requires you to specify a timeout period in seconds. Ex: -t 5, Min acceptable value for timeout is 0.001");
 			throw new Exception();
-		}else if(errCode == 2) {
+		} else if (errCode == 2) {
 			System.out.println("the option \"-r\" requires you to specify the number of maximum retries. Ex: -r 10");
 			throw new Exception();
-		}else if(errCode == 3) {
+		} else if (errCode == 3) {
 			System.out.println("the option \"-p\" requires you to specify the destination port number. Ex: -p 53");
 			throw new Exception();
-		}else if(errCode == 4) {
+		} else if (errCode == 4) {
 			System.out.println("the option -ns and -mx are mutually exclusive.");
 			throw new Exception();
-		}else if (errCode == 5) {
+		} else if (errCode == 5) {
 			System.out.println("ip address must start with @.");
 			throw new Exception();
-		}else if (errCode == 6) {
+		} else if (errCode == 6) {
 			System.out.println("Invalid domain name.");
 			throw new Exception();
-		}else if(errCode == 7) {
+		} else if (errCode == 7) {
 			System.out.println("Invalid ip address.");
 			throw new Exception();
 		}
-		
+
 	}
 
 	private static boolean isInteger(String strNum) {
