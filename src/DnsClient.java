@@ -25,10 +25,205 @@ public class DnsClient {
 
 	public static void main(String[] args) {
 		parse(args);
-		createRequest();
+		DatagramPacket response = createRequest();
+		
+		printResponse(response);
+	}
+
+	private static void printResponse(DatagramPacket response) {
+
+		byte[] data = response.getData();
+//		for(int i = 0; i< data.length; i = i + 2) {
+//			String hex1 = Integer.toHexString(data[i]);
+//			String hex2 = Integer.toHexString(data[i+1]);
+//			System.out.println(hex1+ "\t"+ hex2);
+//		}
+		String auth = null;
+
+		ByteBuffer buffer = ByteBuffer.wrap(data);
+
+		short responseId = buffer.getShort();
+		short flags = buffer.getShort();
+		short qdCount = buffer.getShort();
+		short anCount =	buffer.getShort();
+		short nsCount = buffer.getShort();
+		short arCount = buffer.getShort();
+
+
+
+		if (((flags >> 10) & 1) == 1) {
+			auth = "auth";
+		} else {
+			auth = "nonauth";
+		}
+
+		byte rcode = (byte) (flags & 0x0f);
+
+		if (rcode == 1) {
+			System.out.println("ERROR\tFormat error: the name server was unable to interpret the query");
+			return;
+		} else if (rcode == 2) {
+			System.out.println(
+					"ERROR\tServer failure: the name server was unable to process this query due to a problem with the name server");
+			return;
+		} else if (rcode == 3) {
+			System.out.println(
+					"ERROR\tName error: meaningful only for responses from an authoritative name server, this code signifies that the domain name referenced in the query does not exist");
+			return;
+		} else if (rcode == 4) {
+			System.out.println("ERROR\tNot implemented: the name server does not support the requested kind of query");
+			return;
+		} else if (rcode == 5) {
+			System.out.println(
+					"ERROR\tRefused: the name server refuses to perform the requested operation for policy reasons");
+			return;
+		}
+
+		movePointer(buffer); // skip qname
+		buffer.getShort(); // qtype
+		buffer.getShort(); // qclass
+
+		if (anCount != 0) {
+			System.out.println("***Answer Section (" + anCount + "records )***");
+		} else {
+			System.out.println("NOTFOUND");
+		}
+
+		for (int i = 0; i < anCount; i++) {
+			movePointer(buffer);
+			short type = buffer.getShort();
+			short aClass = buffer.getShort();
+			int ttl = buffer.getInt();
+			short rdLength = buffer.getShort();
+			printAnswer(buffer, type, ttl, rdLength, auth);
+		}
+
+		for (int i = 0; i < nsCount; i++) {
+			movePointer(buffer);
+			short type = buffer.getShort();
+			short aClass = buffer.getShort();
+			int ttl = buffer.getInt();
+			short rdLength = buffer.getShort();
+			buffer.position(buffer.position() + rdLength);
+		}
+
+		if (arCount != 0) {
+			System.out.println("***Additional Section (" + arCount + "records )***");
+			for (int i = 0; i < arCount; i++) {
+				movePointer(buffer);
+				short type = buffer.getShort();
+				short aClass = buffer.getShort();
+				int ttl = buffer.getInt();
+				short rdLength = buffer.getShort();
+				printAnswer(buffer, type, ttl, rdLength, auth);
+			}
+		}
+
+	}
+
+	private static void printAnswer(ByteBuffer buffer, short type, int ttl, short rdLength, String auth) {
+
+		int length = rdLength;
+		switch (type) {
+		case 0x01:
+			String ip = getIp(buffer);
+			System.out.println("IP\t" + ip + "\t" + ttl + "\t" + auth);
+			if (length - 4 > 0) {
+				length = (length - 4);
+				while (length > 0) {
+					buffer.get();
+					length = (length - 1);
+				}
+			}
+			break;
+		case 0x02:
+			String serverName = getAlias(buffer);
+			System.out.println("NS\t" + serverName + "\t" + ttl + "\t" + auth);
+			break;
+		case 0x05:
+			String alias = getAlias(buffer);
+			System.out.println("CNAME\t" + alias + "\t" + ttl + "\t" + auth);
+			break;
+		case 0x0f:
+			short pref = buffer.getShort();
+			String name = getAlias(buffer);
+			System.out.println("MX\t" + name + "\t" + pref + "\t" + ttl + "\t" + auth);
+			break;
+		default:
+			System.out.println("Unexpected Error"); // TODO: write specific error
+		}
+
+	}
+
+	private static String getAlias(ByteBuffer buffer) {
+
+		StringBuilder name = new StringBuilder().append("");
+
+		while (true) {
+			boolean marked = false;
+			byte b = buffer.get();
+
+			if ((b & 0xC0) == 0xC0) {
+				if (marked == false) {
+					buffer.mark();
+				}
+				buffer.position(buffer.position() - 1);
+				short offset = buffer.getShort();
+				offset = (short) (offset & 0x3FFF);
+				buffer.position(offset);
+			} else if ((b == 0x00)) {
+				if (marked == true) {
+					buffer.reset();
+				}
+				return name.toString().substring(0, name.length() - 1);
+			} else {
+				int labelLength = b;
+				addLabel(name, buffer, labelLength);
+
+			}
+		}
+
+	}
+
+	private static void addLabel(StringBuilder name, ByteBuffer buffer, int length) {
+		for (int i = 0; i < length; i++) {
+			name.append((char) buffer.get());
+		}
+		name.append(".");
+
+	}
+
+	private static String getIp(ByteBuffer buffer) {
+		String ip = "";
+		for (int i = 0; i < 4; i++) {
+			ip.concat((Integer.toString((int) buffer.get())));
+			if (!(i == 3)) {
+				ip.concat(".");
+			}
+		}
+
+		return ip;
+	}
+
+	private static void movePointer(ByteBuffer buffer) {
+
+		while (true) {
+			byte b = buffer.get();
+			if ((b & 0xC0) == 0xC0) {
+				buffer.get();
+				return;
+			}
+			if ((b == 0x00)) {
+				return;
+			}
+		}
 	}
 
 	private static DatagramPacket createRequest() {
+
+		if (!printQuerySummary()) {
+			return null;
+		}
 
 		DatagramSocket clientSocket = null;
 
@@ -76,18 +271,20 @@ public class DnsClient {
 
 			try {
 				long startTime = System.currentTimeMillis();
-				
+
 				InetAddress inetAddress = getInetAddress();
 				DatagramPacket sendPacket = new DatagramPacket(data, data.length, inetAddress, port);
 				clientSocket.send(sendPacket);
 				data = new byte[512];
 				DatagramPacket receivePacket = new DatagramPacket(data, data.length);
 				clientSocket.receive(receivePacket);
-				
+				clientSocket.close();
+
 				long endTime = System.currentTimeMillis();
-				double interval = (endTime - startTime)/1000.0;
-				
-				System.out.println("Response received after " + interval + " seconds ( " + i + "retries )");
+				double interval = (endTime - startTime) / 1000.0;
+
+				System.out.println("Response received after " + interval + " seconds ( " + i + " retries )");
+
 				return receivePacket;
 			} catch (IOException e) {
 				e.printStackTrace();
@@ -100,10 +297,31 @@ public class DnsClient {
 
 	}
 
+	private static boolean printQuerySummary() {
+		String t = null;
+
+		if (type == 1) {
+			t = "A";
+		} else if (type == 2) {
+			t = "NS";
+		} else if (type == 15) {
+			t = "MX";
+		} else {
+			System.out.println("Unexpected Error");
+			return false;
+		}
+
+		System.out.println("DnsClient sending request for " + name);
+		System.out.println("Server: " + ipAddress);
+		System.out.println("Request type: " + t);
+
+		return true;
+
+	}
+
 	private static InetAddress getInetAddress() {
 		InetAddress address = null;
 		String[] subStrings = ipAddress.split("\\.");
-
 
 		ByteArrayOutputStream stream = new ByteArrayOutputStream();
 
