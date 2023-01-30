@@ -378,7 +378,6 @@ public class DnsClient {
 			}
 			if (t >= 0.001) {
 				timeout = t;
-				System.out.println(t);
 			} else {
 				displayUsage(1);
 			}
@@ -387,7 +386,12 @@ public class DnsClient {
 		i = argList.indexOf("-r");
 		if (i != -1) {
 			if (isInteger(argList.get(i + 1))) {
-				retries = Integer.parseInt(argList.get(i + 1));
+				int num = Integer.parseInt(argList.get(i + 1));
+				if(num > 0) {
+					retries = num;
+				}else {
+					displayUsage(8);
+				}
 			} else {
 				displayUsage(2);
 			}
@@ -396,7 +400,12 @@ public class DnsClient {
 		i = argList.indexOf("-p");
 		if (i != -1) {
 			if (isInteger(argList.get(i + 1))) {
-				port = Integer.parseInt(argList.get(i + 1));
+				int num = Integer.parseInt(argList.get(i + 1));
+				if (num > 0) {
+					port = num;
+				} else {
+					displayUsage(9);
+				}
 			} else {
 				displayUsage(3);
 			}
@@ -465,7 +474,7 @@ public class DnsClient {
 			System.out.println("the option \"-p\" requires you to specify the destination port number. Ex: -p 53");
 			throw new Exception();
 		} else if (errCode == 4) {
-			System.out.println("the option -ns and -mx are mutually exclusive.");
+			System.out.println("the options -ns and -mx are mutually exclusive.");
 			throw new Exception();
 		} else if (errCode == 5) {
 			System.out.println("ip address must start with @.");
@@ -475,6 +484,12 @@ public class DnsClient {
 			throw new Exception();
 		} else if (errCode == 7) {
 			System.out.println("Invalid ip address.");
+			throw new Exception();
+		}else if (errCode == 8) {
+			System.out.println("port number must be non-negative");
+			throw new Exception();
+		}else if(errCode == 9) {
+			System.out.println("number of retries must be atleast 1");
 			throw new Exception();
 		}
 
